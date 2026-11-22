@@ -4,6 +4,18 @@ T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provid
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
+## Personal fork
+
+This is a personal fork (`mrndstvndv/t3code`) intended for local use over LAN and Tailscale.
+
+- **No T3 Connect / relay:** We do not use or support the T3 Connect relay/tunnel, favoring direct LAN and Tailscale connections (and local server notification streaming without FCM).
+- **Stay close to upstream:** Keep fork-specific diffs minimal and avoid deleting upstream files or `.github/workflows/` unnecessarily (GitHub Actions is disabled at the repo level instead). Write changes to the same standards and conventions as the official repo—code we add should look like something upstream would accept and should merge cleanly with `upstream/main`.
+- **Local helper scripts (`scripts/fork/`):**
+  - `scripts/fork/build-desktop.sh` — build the macOS `arm64` DMG into `../t3code-desktop-build` (pass `--install` to install after building).
+  - `scripts/fork/install-desktop.sh` — install a built DMG into `/Applications/T3 Code (Nightly).app` with APFS backups and rollback instructions.
+  - `scripts/fork/build-android.sh` — build the Android release APK into `../t3code-android-build` (`--clean`, `--install`).
+  - `scripts/fork/sync-upstream.sh` — fetch and merge (or `--rebase`) `upstream/main`, running `vp i` if `pnpm-lock.yaml` changed.
+
 ## What makes T3 Code special?
 
 We have over 500,000 users who love T3 Code. It's important we maintain the things they love as we continue to iterate on the product. Here's a brief list of the things we can never compromise on.
