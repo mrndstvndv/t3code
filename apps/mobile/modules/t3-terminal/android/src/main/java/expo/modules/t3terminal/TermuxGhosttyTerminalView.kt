@@ -19,6 +19,7 @@ import android.widget.TextView
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.terminal.TerminalSessionIO
+import com.termux.terminal.compose.ModifierKeyReader
 import com.termux.terminal.compose.TerminalComposeView
 import com.termux.terminal.compose.TerminalMetrics
 import com.termux.terminal.compose.session.TerminalSessionBackend
@@ -36,7 +37,16 @@ private const val MIN_GRID_DIMENSION = 4
 private const val FONT_SIZE_PILL_HIDE_DELAY_MS = 900L
 private const val FONT_SIZE_PILL_FADE_MS = 150L
 private const val FONT_SIZE_PILL_ALPHA = 0xE6
+private const val MODIFIER_OFF = "off"
+private const val MODIFIER_ARMED = "armed"
+private const val MODIFIER_LOCKED = "locked"
 private val OPENABLE_URL_SCHEMES = setOf("http", "https", "mailto")
+
+private fun normalizeModifierState(value: String): String =
+  when (value) {
+    MODIFIER_ARMED, MODIFIER_LOCKED -> value
+    else -> MODIFIER_OFF
+  }
 
 /**
  * Fork-owned terminal surface rendered by termux-ghostty's compose canvas. Same props and
@@ -59,6 +69,7 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
   private val onCapture by EventDispatcher()
   private val onPaste by EventDispatcher()
   private val onFontSizeChange by EventDispatcher()
+  private val onModifiersConsumed by EventDispatcher()
 
   // appendOutput blocks while the session's input queue is full, so bytes reach it off the main thread,
   // in order. A session generation lets queued feeds for a replaced session drop out.
@@ -71,6 +82,13 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
   private var sessionReady = false
 
   @Volatile private var isCleanedUp = false
+
+  // Sticky modifiers held by the JS key bar ("off", "armed", or "locked"). An armed modifier
+  // clears itself on native as soon as input consumes it, avoiding a JS round-trip race.
+  @Volatile private var ctrlModifierState: String = MODIFIER_OFF
+  @Volatile private var altModifierState: String = MODIFIER_OFF
+  @Volatile private var ctrlModifierConsumed = false
+  @Volatile private var altModifierConsumed = false
   private var streamedOutput: TerminalOutputBuffer? = null
   private var fedBuffer = ""
   private var hasPendingBuffer = false
@@ -194,6 +212,22 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
       onCapture(mapOf("text" to text))
     }
 
+  var ctrlState: String = MODIFIER_OFF
+    set(value) {
+      val normalized = normalizeModifierState(value)
+      field = normalized
+      ctrlModifierState = normalized
+      ctrlModifierConsumed = false
+    }
+
+  var altState: String = MODIFIER_OFF
+    set(value) {
+      val normalized = normalizeModifierState(value)
+      field = normalized
+      altModifierState = normalized
+      altModifierConsumed = false
+    }
+
   private val scaledDensity: Float
     get() = resources.displayMetrics.density * resources.configuration.fontScale
 
@@ -233,6 +267,42 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
     override fun onCodePoint(codePoint: Int, controlDown: Boolean, altDown: Boolean): Boolean = readOnly
   }
 
+  private val modifierKeyReader = object : ModifierKeyReader {
+    override fun readControl(): Boolean {
+      val state = ctrlModifierState
+      if (state == MODIFIER_OFF) return false
+      if (state == MODIFIER_ARMED) ctrlModifierConsumed = true
+      return true
+    }
+
+    override fun readAlt(): Boolean {
+      val state = altModifierState
+      if (state == MODIFIER_OFF) return false
+      if (state == MODIFIER_ARMED) altModifierConsumed = true
+      return true
+    }
+
+    override fun readShift(): Boolean = false
+
+    override fun readFn(): Boolean = false
+
+    override fun clearConsumedModifiers() {
+      val consumeCtrl = ctrlModifierConsumed
+      val consumeAlt = altModifierConsumed
+      if (!consumeCtrl && !consumeAlt) return
+      ctrlModifierConsumed = false
+      altModifierConsumed = false
+      if (consumeCtrl && ctrlModifierState == MODIFIER_ARMED) ctrlModifierState = MODIFIER_OFF
+      if (consumeAlt && altModifierState == MODIFIER_ARMED) altModifierState = MODIFIER_OFF
+      val consumed = mapOf("ctrl" to consumeCtrl, "alt" to consumeAlt)
+      if (Looper.myLooper() == Looper.getMainLooper()) {
+        dispatchModifiersConsumed(consumed)
+      } else {
+        mainHandler.post { dispatchModifiersConsumed(consumed) }
+      }
+    }
+  }
+
   init {
     TerminalTypefaces.ensureLoaded(context)
     terminalView.setTypeface(TerminalTypefaces.regular)
@@ -241,6 +311,7 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
     terminalView.setFontSizeBounds(minFontPx, maxFontPx)
     terminalView.setFontSize(spToFontSizePx(fontSize, scaledDensity, minFontPx, maxFontPx))
     terminalView.listener = terminalListener
+    terminalView.setModifierKeyReader(modifierKeyReader)
 
     configureFontSizePill()
     container.addView(
@@ -311,6 +382,14 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
     terminalView.resetInput()
   }
 
+  // Key bar keys go through the session's key encoder, so cursor-key and keypad modes apply.
+  fun sendKey(keyCode: Int, ctrl: Boolean, alt: Boolean) {
+    if (isCleanedUp || readOnly) return
+    terminalView.resetInput()
+    val metaState = (if (ctrl) KeyEvent.META_CTRL_ON else 0) or (if (alt) KeyEvent.META_ALT_ON else 0)
+    terminalView.submitKey(keyCode, metaState)
+  }
+
   fun applyPendingBuffer() {
     if (!hasPendingBuffer) return
     hasPendingBuffer = false
@@ -324,6 +403,7 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
     removeCallbacks(autoFocusRunnable)
     removeCallbacks(hideFontSizePill)
     terminalView.listener = null
+    terminalView.setModifierKeyReader(null)
     destroySession()
     feedExecutor.shutdownNow()
   }
@@ -536,6 +616,11 @@ class TermuxGhosttyTerminalView(context: Context, appContext: AppContext) : Expo
 
   private fun clipboard(): ClipboardManager? =
     context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+
+  private fun dispatchModifiersConsumed(consumed: Map<String, Boolean>) {
+    if (isCleanedUp) return
+    onModifiersConsumed(consumed)
+  }
 
   private fun dispatchInput(text: String, generation: Long) {
     if (isCleanedUp || readOnly || generation != sessionGeneration.get()) return

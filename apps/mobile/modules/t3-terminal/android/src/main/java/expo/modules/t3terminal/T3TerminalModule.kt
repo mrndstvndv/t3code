@@ -21,6 +21,10 @@ class T3TerminalModule : Module() {
 
       AsyncFunction("resetInput") { view: TermuxGhosttyTerminalView -> view.resetInput() }
 
+      AsyncFunction("sendKey") { view: TermuxGhosttyTerminalView, keyCode: Int, ctrl: Boolean, alt: Boolean ->
+        view.sendKey(keyCode, ctrl, alt)
+      }
+
       Prop("terminalKey") { view: TermuxGhosttyTerminalView, terminalKey: String ->
         view.terminalKey = terminalKey
       }
@@ -72,7 +76,15 @@ class T3TerminalModule : Module() {
       Prop("sharedGrid") { view: TermuxGhosttyTerminalView, sharedGrid: List<Int> ->
         view.sharedGrid = sharedGrid
       }
-      Events("onInput", "onResize", "onCapture", "onPaste", "onFontSizeChange")
+
+      Prop("ctrlState") { view: TermuxGhosttyTerminalView, state: String ->
+        view.ctrlState = state
+      }
+
+      Prop("altState") { view: TermuxGhosttyTerminalView, state: String ->
+        view.altState = state
+      }
+      Events("onInput", "onResize", "onCapture", "onPaste", "onFontSizeChange", "onModifiersConsumed")
 
       OnViewDidUpdateProps { view: TermuxGhosttyTerminalView ->
         view.applyPendingBuffer()

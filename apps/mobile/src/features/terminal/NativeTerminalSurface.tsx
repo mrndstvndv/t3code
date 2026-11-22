@@ -46,6 +46,8 @@ export interface TerminalSurfaceHandle {
   readonly focusKeyboard: () => void;
   /** Drops the native field's IME context after input that bypassed it. */
   readonly resetInput: () => void;
+  /** Android only: sends an Android key code with the given modifiers. */
+  readonly sendKey?: (keyCode: number, ctrl: boolean, alt: boolean) => void;
 }
 
 interface TerminalSurfaceProps extends ViewProps {
@@ -66,6 +68,12 @@ interface TerminalSurfaceProps extends ViewProps {
   readonly onPaste?: (text: string) => void;
   readonly onResize: (size: { readonly cols: number; readonly rows: number }) => void;
   readonly onFontSizeChange?: (fontSize: number) => void;
+  readonly ctrlState?: "off" | "armed" | "locked";
+  readonly altState?: "off" | "armed" | "locked";
+  readonly onModifiersConsumed?: (consumed: {
+    readonly ctrl: boolean;
+    readonly alt: boolean;
+  }) => void;
 }
 
 type ReadyTerminalSurfaceProps = Omit<TerminalSurfaceProps, "buffer"> & {
@@ -244,6 +252,11 @@ const ReadyTerminalSurface = memo(function ReadyTerminalSurface({
         console.error("Terminal input reset failed", error);
       });
     },
+    sendKey: (keyCode, ctrl, alt) => {
+      void nativeRef.current?.sendKey?.(keyCode, ctrl, alt).catch((error: unknown) => {
+        console.error("Terminal key send failed", error);
+      });
+    },
   }));
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- creates the output writer for the native terminal view once it is ready and disposes it on cleanup
@@ -306,6 +319,14 @@ const ReadyTerminalSurface = memo(function ReadyTerminalSurface({
           }}
           onResize={handleNativeResize}
           onFontSizeChange={(event) => props.onFontSizeChange?.(event.nativeEvent.fontSize)}
+          ctrlState={props.ctrlState}
+          altState={props.altState}
+          onModifiersConsumed={(event) =>
+            props.onModifiersConsumed?.({
+              ctrl: event.nativeEvent.ctrl,
+              alt: event.nativeEvent.alt,
+            })
+          }
           captureRequest={props.captureRequest}
           onCapture={(event) => props.onCapture?.(event.nativeEvent.text)}
         />

@@ -22,6 +22,14 @@ import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/ui/AppText";
 import { TerminalContextSheet } from "./TerminalContextSheet";
+import { AndroidTerminalKeyBar } from "./AndroidTerminalKeyBar";
+import {
+  consumeArmedModifier,
+  lockModifier,
+  tapAltModifier,
+  tapCtrlModifier,
+  type KeyModifierState,
+} from "./AndroidTerminalKeyBar.logic";
 import { hasNativeTerminalSurface, supportsNativeTerminalOutput } from "./nativeTerminalModule";
 import * as Clipboard from "expo-clipboard";
 import * as Schema from "effect/Schema";
@@ -505,6 +513,8 @@ function ThreadTerminal(props: {
   const surfaceRef = useRef<TerminalSurfaceHandle>(null);
   const [keyboardFocusRequest, setKeyboardFocusRequest] = useState(0);
   const [pendingModifier, setPendingModifier] = useState<PendingModifier | null>(null);
+  const [ctrlState, setCtrlState] = useState<KeyModifierState>("off");
+  const [altState, setAltState] = useState<KeyModifierState>("off");
   const launchLocation = useInitialTerminalLaunchLocation({
     targetKey: terminalKey,
     pendingLaunch,
@@ -837,7 +847,15 @@ function ThreadTerminal(props: {
     // Pasted text bypasses the native field, so a syllable it holds must not be recomposed.
     surfaceRef.current?.resetInput();
     setPendingModifier(null);
+    setCtrlState(consumeArmedModifier);
+    setAltState(consumeArmedModifier);
     void pasteText(readText);
+  };
+
+  const handleSendKey = (keyCode: number) => {
+    surfaceRef.current?.sendKey?.(keyCode, ctrlState !== "off", altState !== "off");
+    setCtrlState(consumeArmedModifier);
+    setAltState(consumeArmedModifier);
   };
 
   const handleDismissKeyboard = () => {
@@ -1020,6 +1038,12 @@ function ThreadTerminal(props: {
                   onPaste={(text) => handlePaste(async () => text)}
                   onResize={handleResize}
                   onFontSizeChange={setTerminalFontSize}
+                  ctrlState={Platform.OS === "android" ? ctrlState : undefined}
+                  altState={Platform.OS === "android" ? altState : undefined}
+                  onModifiersConsumed={({ ctrl, alt }) => {
+                    if (ctrl) setCtrlState(consumeArmedModifier);
+                    if (alt) setAltState(consumeArmedModifier);
+                  }}
                   style={{ flex: 1 }}
                   terminalKey={terminalKey}
                   theme={terminalTheme}
@@ -1060,7 +1084,37 @@ function ThreadTerminal(props: {
                   </Text>
                 </Pressable>
               ) : null}
-              {isAccessoryVisible ? (
+              {isAccessoryVisible && Platform.OS === "android" ? (
+                <KeyboardStickyView
+                  style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
+                  offset={{ closed: 0, opened: 0 }}
+                >
+                  <View
+                    className="border-t"
+                    style={{
+                      backgroundColor: terminalTheme.background,
+                      borderTopColor: terminalTheme.border,
+                      minHeight: TERMINAL_ACCESSORY_HEIGHT,
+                    }}
+                  >
+                    <AndroidTerminalKeyBar
+                      theme={terminalTheme}
+                      accentColor={themeVariables["--color-primary"]}
+                      accentForegroundColor={themeVariables["--color-primary-foreground"]}
+                      surfaceColor={themeVariables["--color-card-alt"]}
+                      ctrlState={ctrlState}
+                      altState={altState}
+                      onTapCtrl={() => setCtrlState(tapCtrlModifier)}
+                      onLockCtrl={() => setCtrlState(lockModifier)}
+                      onTapAlt={() => setAltState(tapAltModifier)}
+                      onLockAlt={() => setAltState(lockModifier)}
+                      onSendKey={handleSendKey}
+                      onPaste={() => handlePaste(Clipboard.getStringAsync)}
+                      onDismissKeyboard={handleDismissKeyboard}
+                    />
+                  </View>
+                </KeyboardStickyView>
+              ) : isAccessoryVisible ? (
                 <KeyboardStickyView
                   style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
                   offset={{ closed: 0, opened: 0 }}

@@ -29,6 +29,11 @@ interface TerminalFontSizeChangeEvent {
   readonly fontSize: number;
 }
 
+interface TerminalModifiersConsumedEvent {
+  readonly ctrl: boolean;
+  readonly alt: boolean;
+}
+
 export interface NativeTerminalSurfaceProps extends ViewProps {
   readonly ref?: Ref<NativeTerminalSurfaceHandle>;
   readonly appearanceScheme?: "light" | "dark";
@@ -52,12 +57,21 @@ export interface NativeTerminalSurfaceProps extends ViewProps {
   readonly onResize?: (event: NativeSyntheticEvent<TerminalResizeEvent>) => void;
   /** Android only: the font size a pinch gesture settled on. */
   readonly onFontSizeChange?: (event: NativeSyntheticEvent<TerminalFontSizeChangeEvent>) => void;
+  /** Android only: sticky key bar modifier states ("off" | "armed" | "locked"). */
+  readonly ctrlState?: "off" | "armed" | "locked";
+  readonly altState?: "off" | "armed" | "locked";
+  /** Android only: which armed sticky modifiers keyboard input just consumed. */
+  readonly onModifiersConsumed?: (
+    event: NativeSyntheticEvent<TerminalModifiersConsumedEvent>,
+  ) => void;
 }
 
 export interface NativeTerminalSurfaceHandle {
   readonly writeOutput: (data: string, reset: boolean) => Promise<void>;
   /** Absent on native builds that predate it. */
   readonly resetInput?: () => Promise<void>;
+  /** Android only: sends an Android key code through the terminal's key encoder. */
+  readonly sendKey?: (keyCode: number, ctrl: boolean, alt: boolean) => Promise<void>;
 }
 
 let cachedNativeTerminalSurfaceView: ComponentType<NativeTerminalSurfaceProps> | undefined;
