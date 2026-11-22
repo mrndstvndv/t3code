@@ -34,7 +34,7 @@ private fun activityPhasePriority(phase: String) = when (phase) {
 
 private fun isTerminalPhase(phase: String) = phase == "completed" || phase == "failed"
 
-private val whitespace = Regex("(?U)\\s+")
+private val whitespace = Regex("\\s+")
 
 private fun clean(value: String) = value.replace(whitespace, " ").trim()
 
