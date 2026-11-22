@@ -197,6 +197,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
           T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
           T3CODE_DESKTOP_MOCK_UPDATES: "true",
           T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT: "4141",
+          T3CODE_DISABLE_AUTO_UPDATE: "false",
           ...options.env,
         }),
       ),
@@ -304,6 +305,8 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
         T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
         T3CODE_DESKTOP_MOCK_UPDATES: "true",
         T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT: "4141",
+        // The fork turns updates off by default; these tests exercise the updater itself.
+        T3CODE_DISABLE_AUTO_UPDATE: "false",
         ...options.env,
       }),
     ),
