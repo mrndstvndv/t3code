@@ -1,5 +1,6 @@
 package expo.modules.t3agentnotifications
 
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -12,6 +13,7 @@ import android.net.Network
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -48,6 +50,10 @@ class LocalAgentActivityService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    if (intent?.action == ACTION_DISCONNECT) {
+      disconnectAndExit()
+      return START_NOT_STICKY
+    }
     val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val sources = parseSources(prefs.getString("sources", "[]").orEmpty())
     val scheme = prefs.getString("scheme", "t3code") ?: "t3code"
@@ -59,6 +65,15 @@ class LocalAgentActivityService : Service() {
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
+
+  /** Ends the app with the service; reopening the app syncs sources and restarts it. */
+  private fun disconnectAndExit() {
+    AgentNotifications.retainLocalSources(this, emptySet())
+    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+    stopSelf()
+    getSystemService(ActivityManager::class.java).appTasks.forEach { it.finishAndRemoveTask() }
+    Process.killProcess(Process.myPid())
+  }
 
   override fun onDestroy() {
     getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback)
@@ -100,6 +115,7 @@ class LocalAgentActivityService : Service() {
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
       .setShowWhen(false)
       .setContentIntent(launchIntent(scheme))
+      .addAction(0, "Disconnect", disconnectIntent())
       .build()
     if (Build.VERSION.SDK_INT >= 34) {
       ServiceCompat.startForeground(
@@ -124,6 +140,13 @@ class LocalAgentActivityService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
   }
+
+  private fun disconnectIntent(): PendingIntent = PendingIntent.getService(
+    this,
+    NOTIFICATION_ID,
+    Intent(this, LocalAgentActivityService::class.java).setAction(ACTION_DISCONNECT),
+    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+  )
 
   private fun createChannel() {
     if (Build.VERSION.SDK_INT >= 26) {
@@ -267,6 +290,7 @@ class LocalAgentActivityService : Service() {
     private const val INITIAL_BACKOFF_MS = 1_000L
     private const val MAX_BACKOFF_MS = 30_000L
     private const val REJECTED = "rejected"
+    private const val ACTION_DISCONNECT = "expo.modules.t3agentnotifications.DISCONNECT"
 
     fun setSources(context: Context, sourcesJson: String, scheme: String, ongoing: Boolean) {
       context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
