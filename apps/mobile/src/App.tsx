@@ -38,6 +38,7 @@ import {
   installAgentNotificationNavigation,
   setAgentNotificationPathname,
 } from "./features/agent-awareness/notificationNavigation";
+import { useLocalAgentActivitySync } from "./features/agent-awareness/localAgentActivity";
 import {
   installAppShortcuts,
   republishAppShortcuts,
@@ -288,6 +289,7 @@ export default function App() {
 function AppContent() {
   const { themeAppearance } = useAppearancePreferences();
   const navigationTheme = useMobileNavigationTheme();
+  useLocalAgentActivitySync();
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- matches the Android navigation bar to the app theme, as StatusBar does for the status bar
   useEffect(() => {

@@ -119,12 +119,35 @@ object AgentNotifications {
   @Synchronized
   fun receive(context: Context, data: Map<String, String>) {
     val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
-    val updatedAt = data["updated_at"]?.toLongOrNull() ?: return
     val registered = prefs.getBoolean("enabled", false) &&
       data["device_id"] == prefs.getString("deviceId", null) &&
       data["user_id"] == prefs.getString("userId", null)
+    if (registered) deliver(context, prefs, data)
+  }
+
+  /** Receives events from a directly connected server, which has no device registration. */
+  @Synchronized
+  fun receiveLocal(
+    context: Context,
+    data: Map<String, String>,
+    scheme: String,
+    ongoingEnabled: Boolean
+  ) {
+    val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
+    val edit = prefs.edit()
+    if (prefs.getString("scheme", null) != scheme) edit.putString("scheme", scheme)
+    if (prefs.getBoolean("ongoing", false) != ongoingEnabled) {
+      edit.putBoolean("ongoing", ongoingEnabled)
+      if (ongoingEnabled) edit.putBoolean("dismissed", false)
+    }
+    edit.apply()
+    deliver(context, prefs, data)
+  }
+
+  private fun deliver(context: Context, prefs: SharedPreferences, data: Map<String, String>) {
+    val updatedAt = data["updated_at"]?.toLongOrNull() ?: return
     val fresh = System.currentTimeMillis() - updatedAt in -MAX_MESSAGE_AGE_MS..MAX_MESSAGE_AGE_MS
-    if (registered && fresh && NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+    if (fresh && NotificationManagerCompat.from(context).areNotificationsEnabled()) {
       channels(context)
       val scheme = prefs.getString("scheme", "t3code") ?: "t3code"
       val alerted = showAlert(context, prefs, scheme, data)

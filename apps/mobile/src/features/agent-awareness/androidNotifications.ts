@@ -8,6 +8,7 @@ interface AndroidAgentNotifications {
   setThreadOnScreen?(path: string | null): void;
   openLiveUpdateSettings?(): boolean;
   showShowcaseActivity?(scheme: string, data: Record<string, string>): void;
+  setLocalSources?(sourcesJson: string, scheme: string, ongoingEnabled: boolean): void;
 }
 
 const native =
@@ -44,6 +45,13 @@ export function clearAndroidAgentNotifications(): void {
 
 export function setAndroidThreadOnScreen(path: string | null): void {
   native?.setThreadOnScreen?.(path);
+}
+
+export function setAndroidLocalAgentActivitySources(
+  sources: ReadonlyArray<{ id: string; urls: ReadonlyArray<string>; token: string }>,
+  ongoingEnabled: boolean,
+): void {
+  native?.setLocalSources?.(JSON.stringify(sources), appScheme(), ongoingEnabled);
 }
 
 export function supportsAndroidLiveUpdateSettings(): boolean {

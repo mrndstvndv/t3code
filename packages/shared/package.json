@@ -646,6 +646,22 @@
     "./paletteSearchCopy": {
       "types": "./src/paletteSearchCopy.ts",
       "import": "./src/paletteSearchCopy.ts"
+    },
+    "./agentActivity/aggregate": {
+      "types": "./src/agentActivity/aggregate.ts",
+      "import": "./src/agentActivity/aggregate.ts"
+    },
+    "./agentActivity/alerts": {
+      "types": "./src/agentActivity/alerts.ts",
+      "import": "./src/agentActivity/alerts.ts"
+    },
+    "./agentActivity/payloads": {
+      "types": "./src/agentActivity/payloads.ts",
+      "import": "./src/agentActivity/payloads.ts"
+    },
+    "./agentActivity/android": {
+      "types": "./src/agentActivity/android.ts",
+      "import": "./src/agentActivity/android.ts"
     }
   },
   "scripts": {

@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <application>
     <service android:name="expo.modules.notifications.service.ExpoFirebaseMessagingService" tools:node="remove" />
     <service android:name=".AgentMessagingService" android:exported="false">
@@ -10,5 +14,8 @@
     </service>
     <receiver android:name=".AgentActivityDismissReceiver" android:exported="false" />
     <receiver android:name=".AgentActivityExpiryReceiver" android:exported="false" />
+    <service android:name=".LocalAgentActivityService" android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps a connection to the user's own T3 Code server to show live agent status." />
+    </service>
   </application>
 </manifest>

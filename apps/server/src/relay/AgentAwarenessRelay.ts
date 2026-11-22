@@ -53,6 +53,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import { LocalAgentActivity } from "./LocalAgentActivity.ts";
 import { forkParked } from "../serverActivation.ts";
 
 export class AgentAwarenessRelay extends Context.Service<
@@ -430,6 +431,7 @@ export const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
   const random = yield* SecureRandom.SecureRandom;
+  const localActivity = yield* LocalAgentActivity;
   const signingKey = yield* EnvironmentSigningKey;
   const scope = yield* Effect.scope;
   const startedAt = (yield* DateTime.now).epochMilliseconds;
@@ -490,9 +492,6 @@ export const make = Effect.gen(function* () {
     publishRetries.delete(threadId);
     if (retry?.timer !== undefined) yield* Fiber.interrupt(retry.timer);
   });
-  const cancelPublishRetries = Effect.suspend(() =>
-    Effect.forEach([...publishRetries.keys()], cancelPublishRetry, { discard: true }),
-  );
   let schedulePublishRetry: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
   let enqueueTopLevelPublish: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
   const resetPublishedConnection = Effect.gen(function* () {
@@ -504,25 +503,12 @@ export const make = Effect.gen(function* () {
   });
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
-    const publishAgentActivity = yield* readPublishAgentActivityEnabled;
-    if (!publishAgentActivity) {
-      yield* cancelPublishRetries;
-      yield* resetPublishedConnection;
-      yield* Effect.logDebug("agent activity publish skipped; publication disabled", {
-        threadId,
-      });
-      return;
-    }
-    const relayConfig = yield* readRelayConfig;
+    // Local subscribers always receive state; the hosted relay is optional.
+    const relayConfig = (yield* readPublishAgentActivityEnabled) ? yield* readRelayConfig : null;
     if (!relayConfig) {
-      yield* cancelPublishRetries;
-      yield* resetPublishedConnection;
-      yield* Effect.logDebug("agent activity publish skipped; relay link credentials unavailable", {
-        threadId,
-      });
-      return;
-    }
-    if (
+      publishedRelayConfig = undefined;
+      cachedRelayClient = undefined;
+    } else if (
       publishedRelayConfig?.url !== relayConfig.url ||
       publishedRelayConfig.issuer !== relayConfig.issuer ||
       publishedRelayConfig.environmentCredential !== relayConfig.environmentCredential
@@ -537,6 +523,8 @@ export const make = Effect.gen(function* () {
       readonly state: RelayAgentActivityState | null;
       readonly reason: string;
     }) {
+      yield* localActivity.publish(threadId, input.state);
+      if (!relayConfig) return;
       if (cachedRelayClient === undefined) {
         cachedRelayClient = yield* makeRelayClient(relayConfig);
       }
@@ -856,25 +844,6 @@ export const make = Effect.gen(function* () {
   });
 
   const publishActiveThreadsUnsafe = Effect.gen(function* () {
-    const relayUrl = yield* readSecretString(RELAY_URL_SECRET).pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    if (!relayUrl) {
-      yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
-      return "unlinked" as const;
-    }
-    const publishAgentActivity = yield* readPublishAgentActivityEnabled.pipe(
-      Effect.orElseSucceed(() => false),
-    );
-    if (!publishAgentActivity) {
-      yield* Effect.logDebug("agent activity snapshot skipped; publication disabled");
-      return "disabled" as const;
-    }
-    const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
-    if (!relayConfig) {
-      yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
-      return "unlinked" as const;
-    }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
     const projectSnapshot = yield* projects.snapshot;
     const activitySnapshot = yield* threads.getAgentAwarenessSnapshot();
@@ -903,35 +872,17 @@ export const make = Effect.gen(function* () {
     return "published" as const;
   });
 
-  // Many environments never link, so while unlinked the retry backs off from 5
-  // s to 60 s. A linked environment keeps the 5 s retry, because `t3 connect
-  // publish` can turn publishing on from another process. Keep this untraced:
-  // an unlinked environment can retry for the lifetime of the process.
-  const publishActiveThreadsWhenConfigured = Effect.fnUntraced(function* (
-    logEnabledWhenReady: boolean,
-  ) {
-    let unlinkedRetryDelayMs = 5_000;
+  // Keep this untraced: a failing snapshot retries for the lifetime of the process.
+  const publishActiveThreadsWhenConfigured = Effect.fnUntraced(function* () {
     while (true) {
       const result = yield* publishActiveThreadsUnsafe.pipe(
         Effect.orElseSucceed(() => "failed" as const),
       );
       if (result === "published") {
-        if (logEnabledWhenReady) {
-          const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
-          yield* Effect.logInfo("agent activity publishing enabled after link reconciliation", {
-            relayUrl: relayConfig?.url,
-          });
-        }
-        logEnabledWhenReady = false;
-        unlinkedRetryDelayMs = 5_000;
         yield* Queue.take(catchUpRequests);
         continue;
       }
-      const retryDelayMs = result === "unlinked" ? unlinkedRetryDelayMs : 5_000;
-      yield* Effect.race(Effect.sleep(retryDelayMs), Queue.take(catchUpRequests));
-      if (result === "unlinked") {
-        unlinkedRetryDelayMs = Math.min(unlinkedRetryDelayMs * 2, 60_000);
-      }
+      yield* Effect.race(Effect.sleep(5_000), Queue.take(catchUpRequests));
     }
   });
 
@@ -975,9 +926,7 @@ export const make = Effect.gen(function* () {
           break;
       }
       yield* forkParked(
-        Effect.sleep("1 second").pipe(
-          Effect.andThen(publishActiveThreadsWhenConfigured(startupState !== "enabled")),
-        ),
+        Effect.sleep("1 second").pipe(Effect.andThen(publishActiveThreadsWhenConfigured())),
       );
       yield* forkParked(
         Stream.runForEach(threads.streamDomainEvents, (event) => {

@@ -34,6 +34,12 @@ class T3AgentNotificationsModule : Module() {
       AgentNotifications.setThreadOnScreen(path)
     }
 
+    Function("setLocalSources") { sourcesJson: String, scheme: String, ongoingEnabled: Boolean ->
+      appContext.reactContext?.let {
+        LocalAgentActivityService.setSources(it, sourcesJson, scheme, ongoingEnabled)
+      }
+    }
+
     Function("openLiveUpdateSettings") {
       val context = appContext.reactContext
       if (context == null || Build.VERSION.SDK_INT < 36) {

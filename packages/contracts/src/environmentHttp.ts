@@ -1072,6 +1072,19 @@ class EnvironmentPeerLinkHttpApi extends HttpApiGroup.make("peerLink").add(
   }),
 ) {}
 
+const AgentActivityStreamToken = Schema.Struct({
+  token: Schema.String,
+  expiresAt: Schema.String,
+});
+
+export class EnvironmentAgentActivityHttpApi extends HttpApiGroup.make("agentActivity").add(
+  HttpApiEndpoint.post("issueStreamToken", "/api/agent-activity/token", {
+    headers: OptionalBearerHeaders,
+    success: AgentActivityStreamToken,
+    error: [EnvironmentAuthInvalidError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 // Path tokens and optional body signatures authenticate webhooks; read raw bytes to verify signatures.
 const WebhookParams = Schema.Struct({
   hookId: TrimmedNonEmptyString,
@@ -1103,4 +1116,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentVoiceHttpApi)
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentWebhooksHttpApi)
-  .add(EnvironmentPeerLinkHttpApi) {}
+  .add(EnvironmentPeerLinkHttpApi)
+  .add(EnvironmentAgentActivityHttpApi) {}

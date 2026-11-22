@@ -47,8 +47,9 @@ const CREDENTIAL_RESPONSE_HEADERS = {
   pragma: "no-cache",
 } as const;
 
-const appendCredentialResponseHeaders = HttpEffect.appendPreResponseHandler((_request, response) =>
-  Effect.succeed(HttpServerResponse.setHeaders(response, CREDENTIAL_RESPONSE_HEADERS)),
+export const appendCredentialResponseHeaders = HttpEffect.appendPreResponseHandler(
+  (_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeaders(response, CREDENTIAL_RESPONSE_HEADERS)),
 );
 
 const appendDpopChallengeHeader = HttpEffect.appendPreResponseHandler((_request, response) =>

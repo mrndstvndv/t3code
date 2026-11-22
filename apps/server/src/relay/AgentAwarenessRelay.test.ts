@@ -43,6 +43,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
+import * as LocalAgentActivity from "./LocalAgentActivity.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
 const SECOND_THREAD_ID = ThreadId.make("relay-thread-2");
@@ -334,7 +335,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
       getById: () => Effect.succeedSome(project),
     }),
     Effect.provideService(FetchHttpClient.Fetch, fetch),
-    Effect.provide(NodeCrypto.layer),
+    Effect.provide(Layer.mergeAll(NodeCrypto.layer, LocalAgentActivity.layer)),
   );
   return { relay, secrets, secretReads, currentShell, shellReads, publications, catchUp };
 });
@@ -1223,16 +1224,21 @@ it.effect("catches up after startup without polling after success", () =>
     yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("false"));
     yield* relay.requestCatchUp();
     yield* TestClock.adjust("1 second");
-    assert.equal(catchUp.activitySnapshotReads, 1);
+    // Local subscribers still need the snapshot while relay publishing is off.
+    assert.equal(catchUp.activitySnapshotReads, 2);
+    assert.equal(publications.length, 1);
 
     yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("true"));
     yield* relay.requestCatchUp();
     yield* TestClock.adjust("1 second");
-    assert.equal(catchUp.activitySnapshotReads, 2);
+    yield* relay.drain;
+    assert.equal(catchUp.activitySnapshotReads, 3);
+    // Re-enabling the relay resends current state it missed while off.
+    assert.equal(publications.length, 2);
 
     const readsBeforeIdle = secretReads.length;
     yield* TestClock.adjust("10 minutes");
-    assert.equal(catchUp.activitySnapshotReads, 2);
+    assert.equal(catchUp.activitySnapshotReads, 3);
     assert.equal(secretReads.length, readsBeforeIdle);
 
     yield* secrets.set(
@@ -1242,8 +1248,8 @@ it.effect("catches up after startup without polling after success", () =>
     yield* relay.requestCatchUp();
     yield* TestClock.adjust("1 second");
     yield* relay.drain;
-    assert.equal(catchUp.activitySnapshotReads, 3);
-    assert.equal(publications.length, 2);
-    assert.equal(publications[1]?.state?.threadId, THREAD_ID);
+    assert.equal(catchUp.activitySnapshotReads, 4);
+    assert.equal(publications.length, 3);
+    assert.equal(publications[2]?.state?.threadId, THREAD_ID);
   }),
 );
