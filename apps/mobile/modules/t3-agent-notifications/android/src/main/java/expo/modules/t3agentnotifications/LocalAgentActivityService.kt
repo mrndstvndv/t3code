@@ -249,7 +249,7 @@ class LocalAgentActivityService : Service() {
       runCatching {
         val event = JSONObject(json)
         val fields = event.keys().asSequence().associateWith { event.optString(it) }
-        AgentNotifications.receiveLocal(applicationContext, fields, scheme, ongoing)
+        AgentNotifications.receiveLocal(applicationContext, source.id, fields, scheme, ongoing)
       }.onFailure {
         Log.w(TAG, "Dropped an event from server ${source.id}: ${it.javaClass.simpleName}")
       }
@@ -271,8 +271,10 @@ class LocalAgentActivityService : Service() {
         .putString("scheme", scheme)
         .putBoolean("ongoing", ongoing)
         .apply()
+      val sources = parseSources(sourcesJson)
+      AgentNotifications.retainLocalSources(context, sources.mapTo(HashSet()) { it.id })
       val intent = Intent(context, LocalAgentActivityService::class.java)
-      if (parseSources(sourcesJson).isNotEmpty()) {
+      if (sources.isNotEmpty()) {
         try {
           context.startForegroundService(intent)
         } catch (error: IllegalStateException) {

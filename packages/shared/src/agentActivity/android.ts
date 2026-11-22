@@ -16,6 +16,14 @@ import {
   terminalTransitionRows,
 } from "./alerts.ts";
 
+export function androidRowExpiresAt(
+  row: Pick<RelayAgentActivityState, "phase" | "updatedAt">,
+): number {
+  return row.phase === "completed" || row.phase === "failed"
+    ? Date.parse(row.updatedAt) + TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS
+    : agentActivityExpiresAt(row);
+}
+
 export function androidActivityData(aggregate: RelayAgentActivityAggregateState | null) {
   const rows = [...(aggregate?.activities ?? [])].sort(
     (a, b) => activityPhasePriority(a.phase) - activityPhasePriority(b.phase),
@@ -34,14 +42,7 @@ export function androidActivityData(aggregate: RelayAgentActivityAggregateState 
       : failed
         ? "Agent work failed"
         : "Agent work completed";
-  const expiresAt = Math.max(
-    0,
-    ...rows.map((row) =>
-      row.phase === "completed" || row.phase === "failed"
-        ? Date.parse(row.updatedAt) + TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS
-        : agentActivityExpiresAt(row),
-    ),
-  );
+  const expiresAt = Math.max(0, ...rows.map(androidRowExpiresAt));
   return {
     active: String(activeCount > 0),
     activity_chip: activeCount > 0 ? (attentionCount > 0 ? "Review" : "Active") : "",

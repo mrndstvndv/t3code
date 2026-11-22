@@ -51,6 +51,7 @@ object AgentNotifications {
   private const val MAX_MESSAGE_AGE_MS = 10 * 60 * 1000L
   private const val RUNNING_LIFETIME_MS = 2 * 60 * 60 * 1000L
   private const val MAX_LIFETIME_MS = 24 * 60 * 60 * 1000L
+  private const val LOCAL_SOURCES = "localSources"
 
   @Synchronized
   fun configure(
@@ -125,10 +126,14 @@ object AgentNotifications {
     if (registered) deliver(context, prefs, data)
   }
 
-  /** Receives events from a directly connected server, which has no device registration. */
+  /**
+   * Receives events from directly connected servers, which have no device registration. Each
+   * server sends only its own threads, so the card merges every server's latest rows.
+   */
   @Synchronized
   fun receiveLocal(
     context: Context,
+    sourceId: String,
     data: Map<String, String>,
     scheme: String,
     ongoingEnabled: Boolean
@@ -141,7 +146,44 @@ object AgentNotifications {
       if (ongoingEnabled) edit.putBoolean("dismissed", false)
     }
     edit.apply()
-    deliver(context, prefs, data)
+    // Events are generated as they stream, so there is no queue age to check, and a server's
+    // clock is compared only with its own earlier updates.
+    val updatedAt = data["updated_at"]?.toLongOrNull() ?: return
+    val sources = decodeLocalSources(prefs.getString(LOCAL_SOURCES, null))
+    val ordered = updatedAt >= (sources[sourceId]?.updatedAt ?: Long.MIN_VALUE)
+    if (ordered) {
+      sources[sourceId] = localActivitySource(data, updatedAt)
+      prefs.edit().putString(LOCAL_SOURCES, encodeLocalSources(sources)).apply()
+    }
+    if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+    channels(context)
+    val alerted = showAlert(context, prefs, scheme, data)
+    if (ordered) showLocalActivity(context, prefs, sources, data["alert_path"], alerted)
+  }
+
+  /** Forgets servers that are no longer connected, removing their rows from the card. */
+  @Synchronized
+  fun retainLocalSources(context: Context, sourceIds: Set<String>) {
+    val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
+    val sources = decodeLocalSources(prefs.getString(LOCAL_SOURCES, null))
+    if (sources.keys.retainAll(sourceIds)) {
+      prefs.edit().putString(LOCAL_SOURCES, encodeLocalSources(sources)).apply()
+      showLocalActivity(context, prefs, sources, null, false)
+    }
+  }
+
+  private fun showLocalActivity(
+    context: Context,
+    prefs: SharedPreferences,
+    sources: Map<String, LocalActivitySource>,
+    alertPath: String?,
+    alerted: Boolean
+  ) {
+    val now = System.currentTimeMillis()
+    val data = mergedActivityData(sources.values.filter { it.expiresAt > now }) +
+      listOfNotNull(alertPath?.let { "alert_path" to it })
+    // The merged card spans several server clocks, so the phone's clock orders it.
+    updateActivity(context, prefs, data, maxOf(now, prefs.getLong("lastUpdate", 0)), alerted)
   }
 
   private fun deliver(context: Context, prefs: SharedPreferences, data: Map<String, String>) {

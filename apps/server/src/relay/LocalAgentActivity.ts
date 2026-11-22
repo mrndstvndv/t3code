@@ -7,6 +7,7 @@ import type {
 import {
   androidActivityData,
   androidAlertForAggregate,
+  androidRowExpiresAt,
 } from "@t3tools/shared/agentActivity/android";
 import { makeAggregateState } from "@t3tools/shared/agentActivity/aggregate";
 import { isExpiredAgentActivityState } from "@t3tools/shared/agentActivity/payloads";
@@ -70,6 +71,21 @@ export const layer = Layer.effect(
   }),
 );
 
+/** The phone merges every server's rows into one card, so it needs their phases. */
+function encodeActivityRows(aggregate: RelayAgentActivityAggregateState | null): string {
+  return JSON.stringify(
+    (aggregate?.activities ?? []).map((row) => ({
+      phase: row.phase,
+      status: row.status,
+      threadTitle: row.threadTitle,
+      projectTitle: row.projectTitle,
+      deepLink: row.deepLink,
+      updatedAt: row.updatedAt,
+      expiresAt: androidRowExpiresAt(row),
+    })),
+  );
+}
+
 /**
  * Turns each row list into the Android data map a device would receive, alerting only when a
  * row newly needs attention or finishes. The first list is a baseline and never alerts; an
@@ -107,10 +123,12 @@ export function makeAndroidActivityEvents(
                 nowMs,
               })
             : null;
+        const shown = options.live ? aggregate : null;
         const data: Record<string, string> = {
           t3_kind: "agent_activity",
           updated_at: String(nowMs),
-          ...androidActivityData(options.live ? aggregate : null),
+          ...androidActivityData(shown),
+          activity_rows: encodeActivityRows(shown),
           ...alert,
         };
         if (alert) {

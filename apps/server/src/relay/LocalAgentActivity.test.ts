@@ -56,6 +56,17 @@ it.effect("alerts only when a row newly needs attention", () =>
     expect(events.map((data) => data.alert_title)).toEqual([undefined, "Thread", undefined]);
     expect(events[1]?.alert_body).toBe("Input: Project");
     expect(events[1]?.alert_id).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.parse(events[1]?.activity_rows ?? "")).toEqual([
+      {
+        phase: "waiting_for_input",
+        status: "Input",
+        threadTitle: "Thread",
+        projectTitle: "Project",
+        deepLink: "/threads/env/thread",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+        expiresAt: Number(events[1]?.activity_expires_at),
+      },
+    ]);
   }).pipe(Effect.provide(Digest.layerWebCrypto)),
 );
 

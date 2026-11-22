@@ -20,6 +20,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONArray
+import org.json.JSONObject
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
@@ -837,5 +839,145 @@ class LocalAgentActivityRejectedSourcesTest {
     LocalAgentActivityService.markRejected(context, "env-a")
     assertEquals(setOf("env-a", "env-b"), LocalAgentActivityService.takeRejectedSources(context).toSet())
     assertEquals(emptyList<String>(), LocalAgentActivityService.takeRejectedSources(context))
+  }
+}
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [24, 36], manifest = Config.NONE)
+class LocalAgentActivityMergeTest : AgentNotificationsFixture() {
+  private val hourMs = 60 * 60 * 1000L
+
+  private fun row(phase: String, status: String, title: String, minute: Int = 0) = LocalActivityRow(
+    phase,
+    status,
+    title,
+    "Project",
+    "/threads/env/$title",
+    "2026-01-01T00:%02d:00.000Z".format(minute),
+    System.currentTimeMillis() + hourMs
+  )
+
+  private fun source(vararg rows: LocalActivityRow) = LocalActivitySource(
+    0,
+    rows.count { it.phase != "completed" && it.phase != "failed" },
+    rows.toList()
+  )
+
+  private fun event(updatedAt: Long, vararg rows: LocalActivityRow) = mapOf(
+    "t3_kind" to "agent_activity",
+    "updated_at" to updatedAt.toString(),
+    "activity_active_count" to source(*rows).activeCount.toString(),
+    "activity_rows" to JSONArray(
+      rows.map {
+        JSONObject().put("phase", it.phase).put("status", it.status)
+          .put("threadTitle", it.threadTitle).put("projectTitle", it.projectTitle)
+          .put("deepLink", it.deepLink).put("updatedAt", it.updatedAt)
+          .put("expiresAt", it.expiresAt)
+      }
+    ).toString()
+  )
+
+  private fun lines(data: Map<String, String>) =
+    (0..5).mapNotNull { data["activity_line_$it"]?.split('\t')?.get(1) }
+
+  private fun card() = manager.activeNotifications.singleOrNull { it.tag == "t3-agent-activity" }
+    ?.notification
+
+  @Test
+  fun mergeRanksEveryServersRowsLikeTheRelay() {
+    val merged = mergedActivityData(
+      listOf(
+        source(row("running", "Working", "a1"), row("running", "Working", "a2"),
+          row("completed", "Done", "a3", minute = 1)),
+        source(
+          row("waiting_for_approval", "Approval", "b1"),
+          row("failed", "Failed", "b2", minute = 2)
+        ),
+      )
+    )
+    assertEquals(listOf("b1", "b2", "a1", "a2", "a3"), lines(merged))
+    assertEquals("3 active agents · 1 needs attention", merged["activity_title"])
+    assertEquals("Review", merged["activity_chip"])
+    assertEquals("waiting_for_approval", merged["activity_phase"])
+    assertEquals("Approval: b1 · Project", merged["activity_body"])
+    assertEquals("/threads/env/b1", merged["activity_path"])
+
+    val busy = mergedActivityData(
+      listOf(
+        source(*(1..5).map { row("running", "Working", "a$it") }.toTypedArray()),
+        source(row("waiting_for_input", "Input", "b1"), row("completed", "Done", "b2")),
+      )
+    )
+    assertEquals(listOf("b1", "a1", "a2", "a3", "a4"), lines(busy))
+    assertEquals("6 active agents · 1 needs attention", busy["activity_title"])
+
+    val finished = mergedActivityData(
+      listOf(
+        source(row("completed", "Done", "a1", minute = 1)),
+        source(row("completed", "Done", "b1", minute = 3), row("failed", "Failed", "b2")),
+      )
+    )
+    assertEquals(listOf("b2", "b1", "a1"), lines(finished))
+    assertEquals("false", finished["active"])
+    assertEquals("Agent work failed", finished["activity_title"])
+  }
+
+  @Test
+  fun eachServerOrdersOnlyItsOwnUpdatesAndTheCardMergesThem() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.receiveLocal(
+      context, "a", event(now, row("running", "Working", "Alpha")), "t3code-dev", true
+    )
+    // B's clock runs an hour behind A's; its update still belongs on the card.
+    AgentNotifications.receiveLocal(
+      context,
+      "b",
+      event(now - hourMs, row("waiting_for_input", "Input", "Beta")),
+      "t3code-dev",
+      true
+    )
+    val both = card()!!.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
+    assertEquals(listOf("Input Beta", "Working Alpha"), both.lines())
+
+    AgentNotifications.receiveLocal(context, "a", event(now - 1000), "t3code-dev", true)
+    assertTrue(
+      card()!!.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString().contains("Alpha")
+    )
+
+    AgentNotifications.receiveLocal(context, "b", event(now - hourMs + 1), "t3code-dev", true)
+    assertEquals("Alpha", card()!!.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+
+    AgentNotifications.retainLocalSources(context, setOf("b"))
+    assertEquals(null, card())
+  }
+
+  @Test
+  fun aCoveredFinishStaysHiddenWhenAnotherServerRepaintsTheCard() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.receiveLocal(
+      context,
+      "a",
+      event(now, row("completed", "Done", "Alpha")) + mapOf(
+        "alert_id" to "alpha-done",
+        "alert_title" to "Alpha",
+        "alert_body" to "Done: Project",
+        "alert_path" to "/threads/env/Alpha",
+      ),
+      "t3code-dev",
+      true
+    )
+    assertEquals(null, card())
+    assertEquals("alpha-done".hashCode(), manager.activeNotifications.single().id)
+
+    AgentNotifications.receiveLocal(context, "b", event(now - hourMs), "t3code-dev", true)
+    assertEquals(null, card())
+
+    AgentNotifications.receiveLocal(
+      context, "b", event(now - hourMs + 1, row("running", "Working", "Beta")), "t3code-dev", true
+    )
+    assertEquals(
+      listOf("Working Beta", "Done Alpha"),
+      card()!!.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString().lines()
+    )
   }
 }
