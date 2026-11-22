@@ -22,7 +22,6 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.BufferedReader
-import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /** Holds one SSE connection per saved server so agent activity arrives without FCM. */
@@ -220,7 +219,11 @@ class LocalAgentActivityService : Service() {
             }
           }
         }
-      } catch (error: IOException) {
+      } catch (_: InterruptedException) {
+        // stop() and reconnectNow() interrupt this thread; OkHttp can surface that from its pool.
+        Thread.currentThread().interrupt()
+      } catch (error: Exception) {
+        // Any escape here kills the app process, so every failure becomes a reconnect.
         if (!stopped) {
           Log.w(TAG, "Connection to server ${source.id} failed: ${error.javaClass.simpleName}")
         }
