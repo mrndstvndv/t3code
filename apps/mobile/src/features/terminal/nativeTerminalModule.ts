@@ -25,6 +25,10 @@ interface TerminalResizeEvent {
   readonly rows: number;
 }
 
+interface TerminalFontSizeChangeEvent {
+  readonly fontSize: number;
+}
+
 export interface NativeTerminalSurfaceProps extends ViewProps {
   readonly ref?: Ref<NativeTerminalSurfaceHandle>;
   readonly appearanceScheme?: "light" | "dark";
@@ -46,6 +50,8 @@ export interface NativeTerminalSurfaceProps extends ViewProps {
   /** iOS only: clipboard text from a system paste (edit menu, ⌘V, shortcut bar). */
   readonly onPaste?: (event: NativeSyntheticEvent<TerminalPasteEvent>) => void;
   readonly onResize?: (event: NativeSyntheticEvent<TerminalResizeEvent>) => void;
+  /** Android only: the font size a pinch gesture settled on. */
+  readonly onFontSizeChange?: (event: NativeSyntheticEvent<TerminalFontSizeChangeEvent>) => void;
 }
 
 export interface NativeTerminalSurfaceHandle {

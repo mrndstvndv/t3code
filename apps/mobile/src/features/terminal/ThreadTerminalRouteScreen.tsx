@@ -1019,6 +1019,7 @@ function ThreadTerminal(props: {
                   onInput={handleInput}
                   onPaste={(text) => handlePaste(async () => text)}
                   onResize={handleResize}
+                  onFontSizeChange={setTerminalFontSize}
                   style={{ flex: 1 }}
                   terminalKey={terminalKey}
                   theme={terminalTheme}

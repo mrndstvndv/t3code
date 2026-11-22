@@ -4,13 +4,26 @@ apply plugin: 'org.jetbrains.kotlin.android'
 group = 'com.t3tools.terminal'
 version = '0.0.0'
 
+// Fork: the view renders through termux-ghostty (mavenLocal). The upstream JNI build stays opt-in.
+def useLegacyGhosttyJni = (findProperty('t3TerminalUseLegacyJni') ?: 'false').toBoolean()
+
+repositories {
+  mavenLocal()
+}
+
 android {
   namespace 'expo.modules.t3terminal'
   ndkVersion rootProject.ext.ndkVersion
   compileSdk rootProject.ext.compileSdkVersion
+  compileSdkMinor 1
 
   testOptions {
     unitTests.includeAndroidResources = true
+  }
+
+  kotlinOptions {
+    // termux-ghostty AARs are built with a newer Kotlin than this project.
+    freeCompilerArgs += ['-Xskip-metadata-version-check']
   }
 
   defaultConfig {
@@ -24,23 +37,36 @@ android {
       }
     }
 
-    externalNativeBuild {
-      cmake {
-        cppFlags '-std=c++17 -Wall -Wextra -Werror'
+    if (useLegacyGhosttyJni) {
+      externalNativeBuild {
+        cmake {
+          cppFlags '-std=c++17 -Wall -Wextra -Werror'
+        }
       }
     }
   }
 
-  externalNativeBuild {
-    cmake {
-      path 'src/main/cpp/CMakeLists.txt'
-      version '3.22.1'
+  if (useLegacyGhosttyJni) {
+    externalNativeBuild {
+      cmake {
+        path 'src/main/cpp/CMakeLists.txt'
+        version '3.22.1'
+      }
+    }
+  } else {
+    sourceSets {
+      main {
+        jniLibs.srcDirs = []
+      }
     }
   }
 }
 
 dependencies {
   implementation project(':expo-modules-core')
+  implementation 'com.termux:terminal-emulator:0.118.0'
+  implementation 'com.termux:terminal-compose-view:0.1.0'
+  implementation 'com.termux:terminal-compose-session:0.1.0'
   testImplementation 'junit:junit:4.13.2'
   testImplementation 'org.robolectric:robolectric:4.16.1'
 }

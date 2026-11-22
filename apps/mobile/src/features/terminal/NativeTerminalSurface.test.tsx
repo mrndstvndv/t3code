@@ -17,9 +17,25 @@ const mocks = vi.hoisted(() => ({
   unmounts: vi.fn(),
   write: vi.fn(async (_data: string, _reset: boolean) => {}),
   paste: (_text: string) => {},
+  fontSizeChange: (_fontSize: number) => {},
 }));
 
-function RawView({ ref: nativeRef, initialBuffer, onResize, onPaste }: NativeTerminalSurfaceProps) {
+function RawView({
+  ref: nativeRef,
+  initialBuffer,
+  onResize,
+  onPaste,
+  onFontSizeChange,
+}: NativeTerminalSurfaceProps) {
+  useLayoutEffect(() => {
+    mocks.fontSizeChange = (fontSize) =>
+      onFontSizeChange?.({ nativeEvent: { fontSize } } as NativeSyntheticEvent<{
+        fontSize: number;
+      }>);
+    return () => {
+      mocks.fontSizeChange = () => {};
+    };
+  }, [onFontSizeChange]);
   useLayoutEffect(() => {
     mocks.paste = (text) =>
       onPaste?.({ nativeEvent: { text } } as NativeSyntheticEvent<{ text: string }>);
@@ -72,6 +88,7 @@ function setup(revision: number | null) {
   mocks.mounts.mockClear();
   mocks.unmounts.mockClear();
   mocks.paste = () => {};
+  mocks.fontSizeChange = () => {};
   const document = { nodeType: 9, addEventListener() {}, removeEventListener() {} };
   const container = {
     nodeType: 1,
@@ -94,6 +111,7 @@ function setup(revision: number | null) {
         isRunning?: boolean;
         readOnly?: boolean;
         onPaste?: (text: string) => void;
+        onFontSizeChange?: (fontSize: number) => void;
       } = {},
     ) {
       await act(async () => {
@@ -196,4 +214,14 @@ it("forwards a native paste only while the terminal is writable and running", as
   await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, { onPaste, isRunning: false });
   mocks.paste("exited");
   expect(pasted).toEqual(["one\ntwo"]);
+});
+
+it("forwards the font size a native pinch settled on", async () => {
+  await using harness = setup(1);
+  const fontSizes: number[] = [];
+  await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, {
+    onFontSizeChange: (fontSize) => fontSizes.push(fontSize),
+  });
+  mocks.fontSizeChange(12.5);
+  expect(fontSizes).toEqual([12.5]);
 });

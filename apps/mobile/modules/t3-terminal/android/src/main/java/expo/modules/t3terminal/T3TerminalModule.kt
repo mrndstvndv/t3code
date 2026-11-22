@@ -14,72 +14,71 @@ class T3TerminalModule : Module() {
       "outputRevision" to 1,
     )
 
-    View(T3TerminalView::class) {
-      AsyncFunction("writeOutput") { view: T3TerminalView, data: String, reset: Boolean ->
+    View(TermuxGhosttyTerminalView::class) {
+      AsyncFunction("writeOutput") { view: TermuxGhosttyTerminalView, data: String, reset: Boolean ->
         view.writeOutput(data, reset)
       }
 
-      // The Android input field already clears after every change.
-      AsyncFunction("resetInput") { _: T3TerminalView -> }
+      AsyncFunction("resetInput") { view: TermuxGhosttyTerminalView -> view.resetInput() }
 
-      Prop("terminalKey") { view: T3TerminalView, terminalKey: String ->
+      Prop("terminalKey") { view: TermuxGhosttyTerminalView, terminalKey: String ->
         view.terminalKey = terminalKey
       }
 
-      Prop("initialBuffer") { view: T3TerminalView, initialBuffer: String ->
+      Prop("initialBuffer") { view: TermuxGhosttyTerminalView, initialBuffer: String ->
         view.initialBuffer = initialBuffer
       }
 
-      Prop("fontSize") { view: T3TerminalView, fontSize: Double ->
+      Prop("fontSize") { view: TermuxGhosttyTerminalView, fontSize: Double ->
         view.fontSize = fontSize.toFloat()
       }
 
-      Prop("focusRequest") { view: T3TerminalView, focusRequest: Double ->
+      Prop("focusRequest") { view: TermuxGhosttyTerminalView, focusRequest: Double ->
         view.focusRequest = focusRequest
       }
 
-      Prop("readOnly") { view: T3TerminalView, readOnly: Boolean ->
+      Prop("readOnly") { view: TermuxGhosttyTerminalView, readOnly: Boolean ->
         view.readOnly = readOnly
       }
 
-      Prop("autoFocus") { view: T3TerminalView, autoFocus: Boolean ->
+      Prop("autoFocus") { view: TermuxGhosttyTerminalView, autoFocus: Boolean ->
         view.autoFocus = autoFocus
       }
 
-      Prop("appearanceScheme") { view: T3TerminalView, appearanceScheme: String ->
+      Prop("appearanceScheme") { view: TermuxGhosttyTerminalView, appearanceScheme: String ->
         view.appearanceScheme = appearanceScheme
       }
 
-      Prop("themeConfig") { view: T3TerminalView, themeConfig: String ->
+      Prop("themeConfig") { view: TermuxGhosttyTerminalView, themeConfig: String ->
         view.themeConfig = themeConfig
       }
 
-      Prop("backgroundColor") { view: T3TerminalView, backgroundColor: String ->
+      Prop("backgroundColor") { view: TermuxGhosttyTerminalView, backgroundColor: String ->
         view.backgroundColorHex = backgroundColor
       }
 
-      Prop("foregroundColor") { view: T3TerminalView, foregroundColor: String ->
+      Prop("foregroundColor") { view: TermuxGhosttyTerminalView, foregroundColor: String ->
         view.foregroundColorHex = foregroundColor
       }
 
-      Prop("mutedForegroundColor") { view: T3TerminalView, mutedForegroundColor: String ->
+      Prop("mutedForegroundColor") { view: TermuxGhosttyTerminalView, mutedForegroundColor: String ->
         view.mutedForegroundColorHex = mutedForegroundColor
       }
 
-      Prop("captureRequest") { view: T3TerminalView, request: Double ->
+      Prop("captureRequest") { view: TermuxGhosttyTerminalView, request: Double ->
         view.captureRequest = request
       }
 
-      Prop("sharedGrid") { view: T3TerminalView, sharedGrid: List<Int> ->
+      Prop("sharedGrid") { view: TermuxGhosttyTerminalView, sharedGrid: List<Int> ->
         view.sharedGrid = sharedGrid
       }
-      Events("onInput", "onResize", "onCapture")
+      Events("onInput", "onResize", "onCapture", "onPaste", "onFontSizeChange")
 
-      OnViewDidUpdateProps { view: T3TerminalView ->
+      OnViewDidUpdateProps { view: TermuxGhosttyTerminalView ->
         view.applyPendingBuffer()
       }
 
-      OnViewDestroys { view: T3TerminalView ->
+      OnViewDestroys { view: TermuxGhosttyTerminalView ->
         view.cleanup()
       }
     }
