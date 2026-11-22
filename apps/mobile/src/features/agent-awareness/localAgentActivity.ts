@@ -7,14 +7,25 @@ import {
 } from "@t3tools/client-runtime/connection";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
-import { useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { AppState, Platform } from "react-native";
 
-import { requestAgentActivityStreamToken } from "./agentActivityStreamToken";
-import { setAndroidLocalAgentActivitySources } from "./androidNotifications";
+import {
+  forgetAgentActivityStreamToken,
+  requestAgentActivityStreamToken,
+} from "./agentActivityStreamToken";
+import {
+  setAndroidLocalAgentActivitySources,
+  takeAndroidRejectedLocalAgentActivitySources,
+} from "./androidNotifications";
+import { reissuableRejectedSources, removedEnvironmentIds } from "./localAgentActivity.logic";
 import { environmentCatalog } from "../../connection/catalog";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { mobilePreferencesAtom } from "../../state/preferences";
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import {
+  savedConnectionsByIdAtom,
+  useSavedRemoteConnections,
+} from "../../state/use-remote-environment-registry";
 
 // Routes the background service can reach without the app's relay or ssh transport.
 const STREAMABLE_ROUTE_KINDS: ReadonlySet<ConnectionRouteKind> = new Set([
@@ -36,6 +47,25 @@ interface LocalAgentActivitySync {
   readonly ongoingEnabled: boolean;
 }
 
+// Token requests chain on `forgetting`, so none can read back a stored token being forgotten.
+function forgetStreamTokens(
+  environmentIds: ReadonlyArray<EnvironmentId>,
+  forgetting: { current: Promise<unknown> },
+  setStreamTokens: Dispatch<SetStateAction<ReadonlyMap<string, string>>>,
+): void {
+  const forgotten = forgetting.current.then(() =>
+    Promise.all(environmentIds.map(forgetAgentActivityStreamToken)),
+  );
+  forgetting.current = forgotten;
+  void forgotten.then(() =>
+    setStreamTokens((current) => {
+      const next = new Map(current);
+      for (const environmentId of environmentIds) next.delete(environmentId);
+      return next;
+    }),
+  );
+}
+
 export function useLocalAgentActivitySync(): void {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
@@ -45,6 +75,8 @@ export function useLocalAgentActivitySync(): void {
   // A request often fails before the app reconnects after launch, so failures retry with backoff.
   const [streamTokenRetry, setStreamTokenRetry] = useState(0);
   const streamTokenRetryDelayMs = useRef(STREAM_TOKEN_RETRY_MIN_MS);
+  const forgettingStreamTokens = useRef<Promise<unknown>>(Promise.resolve());
+  const previousEnvironmentIds = useRef<EnvironmentId[] | null>(null);
   const ongoingEnabled = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.liveActivitiesEnabled !== false
     : true;
@@ -92,7 +124,36 @@ export function useLocalAgentActivitySync(): void {
     .map(({ connection }) => connection.environmentId)
     .sort();
   const syncKey = JSON.stringify({ sources, ongoingEnabled });
+  const environmentIdsKey = catalog.isReady ? JSON.stringify([...catalog.entries.keys()]) : null;
   const streamTokenKey = JSON.stringify({ pending: pendingStreamTokens, retry: streamTokenRetry });
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- collects the stream tokens the native service saw refused, at launch and on each return to the foreground
+  useEffect(() => {
+    if (Platform.OS !== "android" || !catalog.isReady) return;
+    const reissueRejected = () => {
+      const rejected = reissuableRejectedSources(
+        takeAndroidRejectedLocalAgentActivitySources(),
+        appAtomRegistry.get(savedConnectionsByIdAtom),
+      );
+      if (rejected.length > 0)
+        forgetStreamTokens(rejected, forgettingStreamTokens, setStreamTokens);
+    };
+    reissueRejected();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") reissueRejected();
+    });
+    return () => subscription.remove();
+  }, [catalog.isReady]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drops the SecureStore stream token of each removed server
+  useEffect(() => {
+    if (Platform.OS !== "android" || environmentIdsKey === null) return;
+    const current = JSON.parse(environmentIdsKey) as EnvironmentId[];
+    const previous = previousEnvironmentIds.current;
+    previousEnvironmentIds.current = current;
+    const removed = previous === null ? [] : removedEnvironmentIds(previous, current);
+    if (removed.length > 0) forgetStreamTokens(removed, forgettingStreamTokens, setStreamTokens);
+  }, [environmentIdsKey]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks each DPoP server for the stream token the native service presents, which lives outside React
   useEffect(() => {
@@ -101,17 +162,19 @@ export function useLocalAgentActivitySync(): void {
     for (const environmentId of pending) {
       if (streamTokenRequests.current.has(environmentId)) continue;
       streamTokenRequests.current.add(environmentId);
-      void requestAgentActivityStreamToken(environmentId).then((token) => {
-        streamTokenRequests.current.delete(environmentId);
-        if (token !== null) {
-          streamTokenRetryDelayMs.current = STREAM_TOKEN_RETRY_MIN_MS;
-          setStreamTokens((current) => new Map(current).set(environmentId, token));
-          return;
-        }
-        const delayMs = streamTokenRetryDelayMs.current;
-        streamTokenRetryDelayMs.current = Math.min(delayMs * 2, STREAM_TOKEN_RETRY_MAX_MS);
-        setTimeout(() => setStreamTokenRetry((attempt) => attempt + 1), delayMs);
-      });
+      void forgettingStreamTokens.current
+        .then(() => requestAgentActivityStreamToken(environmentId))
+        .then((token) => {
+          streamTokenRequests.current.delete(environmentId);
+          if (token !== null) {
+            streamTokenRetryDelayMs.current = STREAM_TOKEN_RETRY_MIN_MS;
+            setStreamTokens((current) => new Map(current).set(environmentId, token));
+            return;
+          }
+          const delayMs = streamTokenRetryDelayMs.current;
+          streamTokenRetryDelayMs.current = Math.min(delayMs * 2, STREAM_TOKEN_RETRY_MAX_MS);
+          setTimeout(() => setStreamTokenRetry((attempt) => attempt + 1), delayMs);
+        });
     }
   }, [streamTokenKey]);
 

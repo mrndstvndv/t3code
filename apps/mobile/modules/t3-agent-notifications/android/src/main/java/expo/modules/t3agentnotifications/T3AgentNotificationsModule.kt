@@ -40,6 +40,11 @@ class T3AgentNotificationsModule : Module() {
       }
     }
 
+    Function("takeRejectedLocalSources") {
+      appContext.reactContext?.let { LocalAgentActivityService.takeRejectedSources(it) }
+        ?: emptyList()
+    }
+
     Function("openLiveUpdateSettings") {
       val context = appContext.reactContext
       if (context == null || Build.VERSION.SDK_INT < 36) {

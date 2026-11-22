@@ -9,6 +9,7 @@ interface AndroidAgentNotifications {
   openLiveUpdateSettings?(): boolean;
   showShowcaseActivity?(scheme: string, data: Record<string, string>): void;
   setLocalSources?(sourcesJson: string, scheme: string, ongoingEnabled: boolean): void;
+  takeRejectedLocalSources?(): string[];
 }
 
 const native =
@@ -52,6 +53,11 @@ export function setAndroidLocalAgentActivitySources(
   ongoingEnabled: boolean,
 ): void {
   native?.setLocalSources?.(JSON.stringify(sources), appScheme(), ongoingEnabled);
+}
+
+/** Source ids whose token a server refused since the last call; taking them clears the set. */
+export function takeAndroidRejectedLocalAgentActivitySources(): ReadonlyArray<string> {
+  return native?.takeRejectedLocalSources?.() ?? [];
 }
 
 export function supportsAndroidLiveUpdateSettings(): boolean {

@@ -825,3 +825,17 @@ class AgentNotificationsCompletionTest : AgentNotificationsFixture() {
     assertEquals(5, manager.activeNotifications.size)
   }
 }
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33], manifest = Config.NONE)
+class LocalAgentActivityRejectedSourcesTest {
+  @Test
+  fun takesEachRejectedSourceOnce() {
+    val context = RuntimeEnvironment.getApplication()
+    LocalAgentActivityService.markRejected(context, "env-a")
+    LocalAgentActivityService.markRejected(context, "env-b")
+    LocalAgentActivityService.markRejected(context, "env-a")
+    assertEquals(setOf("env-a", "env-b"), LocalAgentActivityService.takeRejectedSources(context).toSet())
+    assertEquals(emptyList<String>(), LocalAgentActivityService.takeRejectedSources(context))
+  }
+}

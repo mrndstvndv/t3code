@@ -203,6 +203,8 @@ class LocalAgentActivityService : Service() {
           when {
             response.code == 401 || response.code == 403 -> {
               Log.w(TAG, "Server ${source.id} rejected the token (HTTP ${response.code})")
+              // A replaced worker's token was revoked on purpose when its successor was issued.
+              if (!stopped) markRejected(applicationContext, source.id)
               return true
             }
             !response.isSuccessful -> {
@@ -261,6 +263,7 @@ class LocalAgentActivityService : Service() {
     private const val TAG = "T3LocalActivity"
     private const val INITIAL_BACKOFF_MS = 1_000L
     private const val MAX_BACKOFF_MS = 30_000L
+    private const val REJECTED = "rejected"
 
     fun setSources(context: Context, sourcesJson: String, scheme: String, ongoing: Boolean) {
       context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -279,6 +282,22 @@ class LocalAgentActivityService : Service() {
       } else {
         context.stopService(intent)
       }
+    }
+
+    private val rejectedLock = Any()
+
+    internal fun markRejected(context: Context, id: String) = synchronized(rejectedLock) {
+      val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      val rejected = prefs.getStringSet(REJECTED, emptySet()).orEmpty() + id
+      prefs.edit().putStringSet(REJECTED, rejected).apply()
+    }
+
+    /** Source ids whose token a server refused since the last call, so the app can replace them. */
+    fun takeRejectedSources(context: Context): List<String> = synchronized(rejectedLock) {
+      val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      val rejected = prefs.getStringSet(REJECTED, emptySet()).orEmpty().toList()
+      if (rejected.isNotEmpty()) prefs.edit().remove(REJECTED).apply()
+      rejected
     }
 
     private fun parseSources(json: String): List<Source> = try {

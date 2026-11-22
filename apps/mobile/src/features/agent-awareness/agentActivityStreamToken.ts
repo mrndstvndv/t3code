@@ -46,6 +46,13 @@ const saveStreamToken = Effect.fn("agentActivityStreamToken.save")(function* (
   );
 });
 
+const removeStreamToken = Effect.fn("agentActivityStreamToken.remove")(function* (
+  environmentId: EnvironmentId,
+) {
+  const storage = yield* MobileSecureStorage.MobileSecureStorage;
+  yield* storage.removeItem(storageKey(environmentId)).pipe(Effect.ignore);
+});
+
 const issueAgentActivityStreamToken = Effect.fn("agentActivityStreamToken.issue")(function* () {
   return yield* executeConnectedEnvironmentHttpRequest({
     group: "agentActivity",
@@ -87,4 +94,11 @@ export async function requestAgentActivityStreamToken(
     input: undefined,
   });
   return result._tag === "Success" ? result.value : null;
+}
+
+/** Drops the stored stream token so the next request issues a new one. */
+export function forgetAgentActivityStreamToken(environmentId: EnvironmentId): Promise<void> {
+  return Effect.runPromise(
+    removeStreamToken(environmentId).pipe(Effect.provide(MobileSecureStorage.layer)),
+  );
 }
