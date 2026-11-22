@@ -478,6 +478,56 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("SessionStore.lay
     }).pipe(Effect.provide(layerSessionStore())),
   );
 
+  it.effect.each([
+    {
+      name: "device key",
+      issuerInput: relaySessionInput,
+      revokeIssuer: (
+        sessions: SessionStore.SessionStore["Service"],
+        _: SessionStore.IssuedSession,
+      ) => sessions.revokeByProofKey(relaySessionInput.proofKeyThumbprint),
+    },
+    {
+      name: "keyless session",
+      issuerInput: { subject: "phone", method: "bearer-access-token" },
+      revokeIssuer: (
+        sessions: SessionStore.SessionStore["Service"],
+        issuer: SessionStore.IssuedSession,
+      ) => sessions.revoke(issuer.sessionId),
+    },
+  ] as const)(
+    "ties a session issued on behalf of a $name to its issuer",
+    ({ issuerInput, revokeIssuer }) =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionStore.SessionStore;
+        const isValid = (token: string) =>
+          sessions.verify(token).pipe(Effect.option, Effect.map(Option.isSome));
+        const issuer = yield* sessions.issue(issuerInput);
+        const unrelated = yield* sessions.issue({
+          subject: "other",
+          method: "bearer-access-token",
+        });
+        const derivedInput = {
+          subject: "phone",
+          method: "bearer-access-token",
+          ttl: Duration.days(365),
+          issuer: { sessionId: issuer.sessionId, proofKeyThumbprint: issuer.proofKeyThumbprint },
+        } as const;
+        const first = yield* sessions.issue(derivedInput);
+        const derived = yield* sessions.issue(derivedInput);
+
+        expect(DateTime.toEpochMillis(derived.expiresAt)).toBe(
+          DateTime.toEpochMillis(issuer.expiresAt),
+        );
+        expect(yield* isValid(first.token)).toBe(false);
+        yield* sessions.revoke(unrelated.sessionId);
+        yield* sessions.revokeAllExcept(issuer.sessionId);
+        expect(yield* isValid(derived.token)).toBe(true);
+        yield* revokeIssuer(sessions, issuer);
+        expect(yield* isValid(derived.token)).toBe(false);
+      }).pipe(Effect.provide(layerSessionStore())),
+  );
+
   it.effect("keeps the previous desktop session valid when replacement fails", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;

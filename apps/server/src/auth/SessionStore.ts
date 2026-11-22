@@ -416,6 +416,15 @@ export class SessionStore extends Context.Service<
       readonly replaceSessionId?: AuthSessionId;
       /** Keeps the session alive this long past each renewal; `ttl` then bounds only the token. */
       readonly renewalWindow?: Duration.Duration;
+      /**
+       * Issues on behalf of this live session: the new session ends by the issuer's expiry, is
+       * revoked with the issuer's device key (or the issuer itself when it has none), and
+       * replaces the previous session issued on the same behalf.
+       */
+      readonly issuer?: {
+        readonly sessionId: AuthSessionId;
+        readonly proofKeyThumbprint?: string | undefined;
+      };
     }) => Effect.Effect<IssuedSession, SessionCredentialInternalError>;
     /** Trades a renewable token, even an expired one, for a fresh token on the same session. */
     readonly renew: (
@@ -732,9 +741,27 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError((cause) => new SessionCredentialIssueError({ cause }))),
       );
       const issuedAt = yield* DateTime.now;
-      const expiresAt = DateTime.add(issuedAt, {
+      const requestedExpiresAt = DateTime.add(issuedAt, {
         milliseconds: Duration.toMillis(input?.ttl ?? DEFAULT_SESSION_TTL),
       });
+      const issuer = input?.issuer;
+      let expiresAt = requestedExpiresAt;
+      if (issuer !== undefined) {
+        const issuerRow = yield* authSessions
+          .getById({ sessionId: issuer.sessionId })
+          .pipe(Effect.mapError((cause) => new SessionCredentialIssueError({ sessionId, cause })));
+        if (
+          Option.isNone(issuerRow) ||
+          issuerRow.value.revokedAt !== null ||
+          issuerRow.value.expiresAt.epochMilliseconds <= issuedAt.epochMilliseconds
+        ) {
+          return yield* new SessionCredentialIssueError({
+            sessionId,
+            cause: new UnknownSessionTokenError({ sessionId: issuer.sessionId }),
+          });
+        }
+        expiresAt = DateTime.min(requestedExpiresAt, issuerRow.value.expiresAt);
+      }
       const sessionExpiresAt = input?.renewalWindow
         ? DateTime.add(issuedAt, { milliseconds: Duration.toMillis(input.renewalWindow) })
         : expiresAt;
@@ -771,13 +798,20 @@ const make = Effect.gen(function* () {
         issuedAt,
         expiresAt: sessionExpiresAt,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
+        ...(issuer === undefined
+          ? {}
+          : issuer.proofKeyThumbprint !== undefined
+            ? { issuerProofKeyThumbprint: issuer.proofKeyThumbprint }
+            : { issuerSessionId: issuer.sessionId }),
       } satisfies AuthSessions.CreateAuthSessionInput;
       const replacedSessionIds = yield* (
-        input?.replaceSessionId !== undefined || input?.replaceActiveForSubjectAndMethod
+        input?.replaceSessionId !== undefined ||
+        input?.replaceActiveForSubjectAndMethod ||
+        issuer !== undefined
           ? authSessions.createReplacingActive({
               session: sessionRecord,
               revokedAt: issuedAt,
-              ...(input.replaceSessionId !== undefined
+              ...(input?.replaceSessionId !== undefined
                 ? { replaceSessionId: input.replaceSessionId }
                 : {}),
             })
@@ -1184,21 +1218,19 @@ const make = Effect.gen(function* () {
   const revoke: SessionStore["Service"]["revoke"] = Effect.fn("SessionStore.revoke")(
     function* (sessionId) {
       const revokedAt = yield* DateTime.now;
-      const revoked = yield* authSessions
+      const revokedSessionIds = yield* authSessions
         .revoke({
           sessionId,
           revokedAt,
         })
         .pipe(Effect.mapError((cause) => new SessionRevocationError({ sessionId, cause })));
-      if (revoked) {
-        yield* Ref.update(connectedSessionsRef, (current) => {
-          const next = new Map(current);
-          next.delete(sessionId);
-          return next;
-        });
-        yield* emitRemoved(sessionId);
-      }
-      return revoked;
+      yield* Ref.update(connectedSessionsRef, (current) => {
+        const next = new Map(current);
+        for (const revokedSessionId of revokedSessionIds) next.delete(revokedSessionId);
+        return next;
+      });
+      yield* Effect.forEach(revokedSessionIds, emitRemoved, { discard: true });
+      return revokedSessionIds.includes(sessionId);
     },
   );
 

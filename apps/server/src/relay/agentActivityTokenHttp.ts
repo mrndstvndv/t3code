@@ -17,6 +17,7 @@ import {
 } from "../auth/http.ts";
 
 // A plain bearer the native notification service can present; it cannot be used for anything but reading.
+// It follows the requesting device's lifetime and replaces that device's previous one.
 const STREAM_TOKEN_TTL = Duration.days(90);
 
 export const agentActivityTokenHttpApiLayer = HttpApiBuilder.group(
@@ -36,6 +37,7 @@ export const agentActivityTokenHttpApiLayer = HttpApiBuilder.group(
             scopes: [AuthOrchestrationReadScope],
             ttl: STREAM_TOKEN_TTL,
             label: "Android notifications",
+            issuer: principal,
           });
           yield* appendCredentialResponseHeaders;
           return {

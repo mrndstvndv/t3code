@@ -53,6 +53,10 @@ export const CreateAuthSessionInput = Schema.Struct({
   issuedAt: Schema.DateTimeUtcFromString,
   expiresAt: Schema.DateTimeUtcFromString,
   proofKeyThumbprint: Schema.optionalKey(Schema.String),
+  /** Set on a session issued on behalf of a session without a device key; revoked with it. */
+  issuerSessionId: Schema.optionalKey(AuthSessionId),
+  /** Set on a session issued on behalf of a device key; revoked with that key's sessions. */
+  issuerProofKeyThumbprint: Schema.optionalKey(Schema.String),
 });
 export type CreateAuthSessionInput = typeof CreateAuthSessionInput.Type;
 
@@ -126,9 +130,10 @@ export class AuthSessionRepository extends Context.Service<
     readonly listActive: (
       input: ListActiveAuthSessionsInput,
     ) => Effect.Effect<ReadonlyArray<AuthSessionRecord>, AuthSessionRepositoryError>;
+    /** Revokes the session and the sessions issued on its behalf; returns every id it revoked. */
     readonly revoke: (
       input: RevokeAuthSessionInput,
-    ) => Effect.Effect<boolean, AuthSessionRepositoryError>;
+    ) => Effect.Effect<ReadonlyArray<AuthSessionId>, AuthSessionRepositoryError>;
     /** Moves a live session's expiry; false when it is revoked, expired, missing or past `onlyIfExpiresBy`. */
     readonly extend: (
       input: ExtendAuthSessionInput,
@@ -243,7 +248,9 @@ export const make = Effect.gen(function* () {
           issued_at,
           expires_at,
           revoked_at,
-          proof_key_thumbprint
+          proof_key_thumbprint,
+          issuer_session_id,
+          issuer_proof_key_thumbprint
         )
         VALUES (
           ${input.sessionId},
@@ -259,7 +266,9 @@ export const make = Effect.gen(function* () {
           ${input.issuedAt},
           ${input.expiresAt},
           NULL,
-          ${input.proofKeyThumbprint ?? null}
+          ${input.proofKeyThumbprint ?? null},
+          ${input.issuerSessionId ?? null},
+          ${input.issuerProofKeyThumbprint ?? null}
         )
         ${ignoreExisting ? sql`ON CONFLICT(session_id) DO NOTHING` : sql``}
       `,
@@ -300,9 +309,13 @@ export const make = Effect.gen(function* () {
         UPDATE auth_sessions
         SET revoked_at = ${revokedAt}
         WHERE ${
-          replaceSessionId === undefined
-            ? sql`subject = ${session.subject}`
-            : sql`session_id = ${replaceSessionId}`
+          replaceSessionId !== undefined
+            ? sql`session_id = ${replaceSessionId}`
+            : session.issuerProofKeyThumbprint !== undefined
+              ? sql`issuer_proof_key_thumbprint = ${session.issuerProofKeyThumbprint}`
+              : session.issuerSessionId !== undefined
+                ? sql`issuer_session_id = ${session.issuerSessionId}`
+                : sql`subject = ${session.subject}`
         }
           AND method = ${session.method}
           AND revoked_at IS NULL
@@ -356,7 +369,7 @@ export const make = Effect.gen(function* () {
       sql`
         UPDATE auth_sessions
         SET revoked_at = ${revokedAt}
-        WHERE session_id = ${sessionId}
+        WHERE (session_id = ${sessionId} OR issuer_session_id = ${sessionId})
           AND revoked_at IS NULL
         RETURNING session_id AS "sessionId"
       `,
@@ -396,7 +409,10 @@ export const make = Effect.gen(function* () {
       sql`
         UPDATE auth_sessions
         SET revoked_at = ${revokedAt}
-        WHERE proof_key_thumbprint = ${proofKeyThumbprint}
+        WHERE (
+            proof_key_thumbprint = ${proofKeyThumbprint}
+            OR issuer_proof_key_thumbprint = ${proofKeyThumbprint}
+          )
           AND revoked_at IS NULL
         RETURNING session_id AS "sessionId"
       `,
@@ -411,6 +427,13 @@ export const make = Effect.gen(function* () {
         SET revoked_at = ${revokedAt}
         WHERE session_id <> ${currentSessionId}
           AND revoked_at IS NULL
+          AND issuer_session_id IS NOT ${currentSessionId}
+          AND (
+            issuer_proof_key_thumbprint IS NULL
+            OR issuer_proof_key_thumbprint IS NOT (
+              SELECT proof_key_thumbprint FROM auth_sessions WHERE session_id = ${currentSessionId}
+            )
+          )
         RETURNING session_id AS "sessionId"
       `,
   });
@@ -522,7 +545,7 @@ export const make = Effect.gen(function* () {
           { sessionId: input.sessionId },
         ),
       ),
-      Effect.map((rows) => rows.length > 0),
+      Effect.map((rows) => rows.map((row) => row.sessionId)),
     );
 
   const extend: AuthSessionRepository["Service"]["extend"] = (input) =>

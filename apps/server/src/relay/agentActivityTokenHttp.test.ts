@@ -68,7 +68,7 @@ const withRoutes = <A, E>(
     return yield* body(new URL(`http://${host}:${address.port}/api/agent-activity/token`));
   }).pipe(Effect.scoped, Effect.provide(NodeHttpServer.layerTest));
 
-effectIt.live("issues a read-only stream token for the caller", () =>
+effectIt.live("issues a read-only stream token tied to the caller", () =>
   Effect.gen(function* () {
     const issueSession = vi.fn<EnvironmentAuth.EnvironmentAuth["Service"]["issueSession"]>(() =>
       Effect.succeed(issued),
@@ -86,6 +86,7 @@ effectIt.live("issues a read-only stream token for the caller", () =>
       scopes: ["orchestration:read"],
       ttl: Duration.days(90),
       label: "Android notifications",
+      issuer: expect.objectContaining({ sessionId: "agent-activity-test" }),
     });
   }),
 );

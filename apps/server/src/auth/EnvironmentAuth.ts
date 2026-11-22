@@ -596,6 +596,8 @@ export class EnvironmentAuth extends Context.Service<
       readonly subject?: string;
       readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
       readonly label?: string;
+      /** Ties the session to the caller's device; see `SessionStore.issue`. */
+      readonly issuer?: Pick<AuthenticatedSession, "sessionId" | "proofKeyThumbprint">;
     }) => Effect.Effect<IssuedBearerSession, ServerAuthInternalError>;
     readonly listSessions: () => Effect.Effect<
       ReadonlyArray<AuthClientSession>,
@@ -1341,6 +1343,7 @@ export const make = Effect.gen(function* () {
           deviceType: "bot",
         },
         ...(input?.ttl ? { ttl: input.ttl } : {}),
+        ...(input?.issuer ? { issuer: input.issuer } : {}),
       })
       .pipe(
         Effect.map(
